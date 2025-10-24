@@ -123,20 +123,71 @@ public void run() {
 
         String message = in.readUTF();
 
-        // ✅ 如果是排行榜請求
+        // ✅ 排行榜請求
         if (message.equals("GET_RANKING")) {
             String allData = Server.readAllData();
             out.writeUTF("=== 所有上傳資料 ===\n" + allData);
             out.flush();
+        }
+
+        // ✅ 圖片上傳處理
+ else if (message.startsWith("IMAGE:")) {
+    String[] parts = message.split(":", 3);
+    if (parts.length < 3) {
+        out.writeUTF("錯誤：圖片格式不正確");
+        out.flush();
+        return;
+    }
+
+    String filename = parts[1];
+    String base64Data = parts[2];
+
+    // 🔹 移除非法檔名字元（保險起見）
+    filename = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
+
+    // 🔹 建立輸出資料夾 (若不存在)
+    File saveDir = new File("received_images");
+    if (!saveDir.exists()) saveDir.mkdirs();
+
+    // 🔹 自動加上日期時間避免覆蓋舊檔
+    String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+    File outputFile = new File(saveDir, timestamp + "_" + filename);
+
+    try {
+        // 🔹 解碼並儲存
+        byte[] imageBytes = Base64.getDecoder().decode(base64Data);
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            fos.write(imageBytes);
+            fos.flush(); // 確保資料完全寫入磁碟
+        }
+
+        // 🔹 檢查儲存結果
+        if (outputFile.exists() && outputFile.length() > 0) {
+            System.out.println("收到圖片並儲存為：" + outputFile.getAbsolutePath() +
+                               " (" + outputFile.length() / 1024 + " KB)");
+            out.writeUTF("伺服器成功收到並儲存圖片：" + outputFile.getName());
         } else {
-            // ✅ 一般上傳資料
+            System.out.println("圖片儲存失敗：" + outputFile.getAbsolutePath());
+            out.writeUTF("伺服器收到圖片，但儲存失敗：" + filename);
+        }
+    } catch (Exception e) {
+        System.out.println("儲存圖片時發生錯誤：" + e.getMessage());
+        out.writeUTF("伺服器在儲存圖片時出現錯誤：" + e.getMessage());
+    }
+
+    out.flush();
+}
+
+
+        // ✅ 一般資料上傳
+        else {
             String[] parts = message.split(",");
             String name = parts.length > 0 ? parts[0] : "未知";
             String total = parts.length > 1 ? parts[1] : "N/A";
 
             System.out.println("[" + new Date() + "] 收到使用者: " + name + "，碳排放量: " + total + " g CO2");
 
-            // 儲存到文字檔
+            // 儲存到 Google Sheets
             Server.saveData(name, total);
 
             // 回覆全部資料
@@ -152,5 +203,6 @@ public void run() {
         System.out.println("Client disconnected: " + e.getMessage());
     }
 }
+
 
 }
