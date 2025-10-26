@@ -7,12 +7,13 @@ import java.io.*;
 import java.util.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 public class Server {
     private ServerSocket serverSocket;
     private static int port;
     private static String messageout;
     private static final String DATA_FILE = "data.txt";
+    private static final String urlString = "https://script.google.com/macros/s/AKfycbxcTHEwwAyBUjqfDk3cwhhOzxLLaYt2N3gIVGrkVXSVRMrJnpL9Ypu9OrYklIVMvLJq4w/exec";
+    public static final String URL_STRING = urlString;
 
     public Server() {
         try {
@@ -51,7 +52,7 @@ public class Server {
         obj.put("total", total);
 
         // Google Script 部署網址
-        String urlString = "https://script.google.com/macros/s/AKfycbwKnCwuT4fwapsoBuXC2NMKPjVdw45eDvODDzePZy2O5mwBHjgGSbHSfL32MBr3rSfarg/exec";
+
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
@@ -78,7 +79,7 @@ public class Server {
 
 public static synchronized String readAllData() {
     try {
-        String urlString = "https://script.google.com/macros/s/AKfycbwKnCwuT4fwapsoBuXC2NMKPjVdw45eDvODDzePZy2O5mwBHjgGSbHSfL32MBr3rSfarg/exec";
+
         URL url = new URL(urlString);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
@@ -139,44 +140,45 @@ public void run() {
         return;
     }
 
-    String filename = parts[1];
-    String base64Data = parts[2];
-
-    // 🔹 移除非法檔名字元（保險起見）
-    filename = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
-
-    // 🔹 建立輸出資料夾 (若不存在)
-    File saveDir = new File("received_images");
-    if (!saveDir.exists()) saveDir.mkdirs();
-
-    // 🔹 自動加上日期時間避免覆蓋舊檔
-    String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-    File outputFile = new File(saveDir, timestamp + "_" + filename);
+    String name = parts[1];        // 第二段為姓名
+    String base64Data = parts[2];  // 第三段為圖片 Base64
 
     try {
-        // 🔹 解碼並儲存
-        byte[] imageBytes = Base64.getDecoder().decode(base64Data);
-        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-            fos.write(imageBytes);
-            fos.flush(); // 確保資料完全寫入磁碟
+        // 🔹 建立要上傳的 JSON 資料
+        JSONObject obj = new JSONObject();
+        obj.put("name", name);
+        obj.put("imageBase64", base64Data);
+
+        // 🔹 Google Script 網址
+        URL url = new URL(Server.URL_STRING);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        conn.setDoOutput(true);
+
+        // 🔹 傳送資料到 Google Sheet
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(obj.toString().getBytes("UTF-8"));
         }
 
-        // 🔹 檢查儲存結果
-        if (outputFile.exists() && outputFile.length() > 0) {
-            System.out.println("收到圖片並儲存為：" + outputFile.getAbsolutePath() +
-                               " (" + outputFile.length() / 1024 + " KB)");
-            out.writeUTF("伺服器成功收到並儲存圖片：" + outputFile.getName());
+        int responseCode = conn.getResponseCode();
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            out.writeUTF("✅ 圖片 Base64 已成功上傳到 Google Sheet（欄 C）");
+            System.out.println("成功上傳圖片 Base64 到 Google Sheet: " + name);
         } else {
-            System.out.println("圖片儲存失敗：" + outputFile.getAbsolutePath());
-            out.writeUTF("伺服器收到圖片，但儲存失敗：" + filename);
+            out.writeUTF("❌ 上傳失敗，狀態碼：" + responseCode);
+            System.out.println("上傳失敗：" + responseCode);
         }
+
+        conn.disconnect();
     } catch (Exception e) {
-        System.out.println("儲存圖片時發生錯誤：" + e.getMessage());
-        out.writeUTF("伺服器在儲存圖片時出現錯誤：" + e.getMessage());
+        out.writeUTF("❌ 上傳圖片 Base64 時發生錯誤：" + e.getMessage());
+        System.out.println("Error uploading Base64: " + e.getMessage());
     }
 
     out.flush();
 }
+
 
 
         // ✅ 一般資料上傳
