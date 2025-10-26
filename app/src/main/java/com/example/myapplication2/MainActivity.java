@@ -15,6 +15,9 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Button;
 import android.view.View;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -653,58 +656,81 @@ public class MainActivity extends AppCompatActivity
 
         return mode == AppOpsManager.MODE_ALLOWED;
     }
+    private static final int BUFFER_SIZE = 65536;
     private void sendMessageToServer(double total) {
         new Thread(() -> {
+            Socket socket = null;
+            DataOutputStream out = null;
+            DataInputStream in = null;
+
             try {
-                String serverIP = Config.SERVER_IP;
-                int port = Config.SERVER_PORT;
-                Socket socket = new Socket(serverIP, port);
+                long startTime = System.currentTimeMillis();
 
-                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                DataInputStream in = new DataInputStream(socket.getInputStream());
-
+                // 取得使用者名稱
                 SharedPreferences prefs = getSharedPreferences("user_profile", MODE_PRIVATE);
                 String name = prefs.getString("name", "使用者");
 
-                // 傳送格式：「name,total」
-                String message = name + "," + total;
-                out.writeUTF(message);
+                System.out.println("=== 開始上傳碳足跡資料 ===");
+                System.out.println("使用者: " + name);
+                System.out.println("碳排放量: " + total + " g CO₂");
+
+                // 建立連接（使用緩衝區優化）
+                socket = new Socket(Config.SERVER_IP, Config.SERVER_PORT);
+                socket.setSendBufferSize(BUFFER_SIZE);
+                socket.setReceiveBufferSize(BUFFER_SIZE);
+                socket.setTcpNoDelay(false);
+
+                out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream(), BUFFER_SIZE));
+                in = new DataInputStream(new BufferedInputStream(socket.getInputStream(), BUFFER_SIZE));
+
+                // 📤 發送命令和資料（與 Server.java 協議一致）
+                out.writeUTF("UPLOAD_DATA");  // 命令類型
+                out.writeUTF(name + "," + total);  // 資料內容
                 out.flush();
 
-                // 伺服器回傳 JSON 陣列字串
+                System.out.println("✅ 資料已發送");
+
+                // 📥 接收伺服器回應
                 String response = in.readUTF();
-                Log.d("Client", "Server JSON: " + response);
+                long endTime = System.currentTimeMillis();
+                double seconds = (endTime - startTime) / 1000.0;
 
-                // ✅ 解析 JSON 資料
-                JSONArray jsonArray = new JSONArray(response);
-                List<String> dataList = new ArrayList<>();
+                System.out.println("伺服器回應: " + response);
+                System.out.println("總耗時: " + String.format("%.2f", seconds) + " 秒");
 
-                for (int i = 0; i < jsonArray.length(); i++) {
-                    JSONObject obj = jsonArray.getJSONObject(i);
-                    String line = obj.getString("timestamp") + " - " +
-                            obj.getString("name") + ": " +
-                            obj.getString("total") + " g CO₂";
-                    dataList.add(line);
-                }
+                // ✅ 解析回應（伺服器會返回所有資料）
+//                parseAndDisplayResponse(response, name, total);
 
-                // ✅ 顯示結果（例如更新 UI）
-                runOnUiThread(() -> {
-                    for (String line : dataList) {
-                        Log.i("Data", line);
-                    }
-                    Toast.makeText(this, "成功接收 " + dataList.size() + " 筆資料", Toast.LENGTH_SHORT).show();
-                });
-
-                in.close();
-                out.close();
-                socket.close();
             } catch (IOException e) {
-                Log.e("Client", "Error connecting to server: " + e.getMessage());
+                Log.e("Client", "連接伺服器錯誤: " + e.getMessage());
+                e.printStackTrace();
+
+                runOnUiThread(() ->
+                        Toast.makeText(this, "❌ 連接失敗: " + e.getMessage(), Toast.LENGTH_LONG).show()
+                );
+
             } catch (Exception e) {
-                Log.e("Client", "JSON parse error: " + e.getMessage());
+                Log.e("Client", "處理資料錯誤: " + e.getMessage());
+                e.printStackTrace();
+
+                runOnUiThread(() ->
+                        Toast.makeText(this, "❌ 資料處理失敗: " + e.getMessage(), Toast.LENGTH_LONG).show()
+                );
+
+            } finally {
+                // 確保資源正確關閉
+                try {
+                    if (in != null) in.close();
+                    if (out != null) out.close();
+                    if (socket != null) socket.close();
+                    System.out.println("連接已關閉");
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         }).start();
     }
+
 
 
 
