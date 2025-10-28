@@ -103,6 +103,30 @@ public class Server {
         }
     }
 
+    // 🔹 新增：讀取包含圖片的完整資料
+    public static synchronized String readAllDataWithImages() {
+        try {
+            // 在 URL 後面加上參數，告訴 Google Apps Script 要返回圖片
+            URL url = new URL(urlString + "?includeImages=true");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(30000); // 因為有圖片，延長超時時間
+            conn.setReadTimeout(30000);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            br.close();
+
+            System.out.println("成功讀取含圖片的資料，長度: " + sb.length());
+            return sb.toString();
+        } catch (Exception e) {
+            System.out.println("Error reading data with images: " + e.getMessage());
+            return "[]";
+        }
+    }
+
     public static void main(String[] args) {
         if (args.length < 2) {
             System.out.println("Usage: java Server [port] [messageout]");
@@ -143,11 +167,26 @@ class ClientHandler implements Runnable {
             String command = in.readUTF();
             System.out.println("收到命令: " + command);
 
-            // ✅ 排行榜請求
+            // ✅ 排行榜請求（不含圖片）
             if (command.equals("GET_RANKING")) {
                 String allData = Server.readAllData();
                 out.writeUTF("=== 所有上傳資料 ===\n" + allData);
                 out.flush();
+            }
+
+            // 🔹 新增：排行榜請求（含圖片）
+            else if (command.equals("GET_RANKING_WITH_IMAGE")) {
+                System.out.println("處理含圖片的排行榜請求...");
+                String allData = Server.readAllDataWithImages();
+                
+                // 檢查資料是否有效
+                if (allData.equals("[]") || allData.isEmpty()) {
+                    out.writeUTF("[]");
+                } else {
+                    out.writeUTF(allData);
+                }
+                out.flush();
+                System.out.println("已傳送排行榜資料（含圖片）");
             }
 
             // ✅ 大型圖片上傳處理（使用分塊傳輸）
