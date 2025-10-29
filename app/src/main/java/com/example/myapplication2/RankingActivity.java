@@ -16,9 +16,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,19 +41,26 @@ public class RankingActivity extends AppCompatActivity {
     }
 
     private void fetchRankingFromServer() {
+        Socket socket = null;
+        DataOutputStream out = null;
+        DataInputStream in = null;
+
         try {
-            Socket socket = new Socket(serverIP, port);
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            DataInputStream in = new DataInputStream(socket.getInputStream());
+            socket = new Socket(serverIP, port);
+            socket.setReceiveBufferSize(65536); // 64KB 緩衝區
+
+            out = new DataOutputStream(socket.getOutputStream());
+            in = new DataInputStream(new BufferedInputStream(socket.getInputStream(), 65536));
 
             // ✅ 傳送排行榜請求(含圖片)
             out.writeUTF("GET_RANKING_WITH_IMAGE");
             out.flush();
             Log.d("Ranking", "已發送 GET_RANKING_WITH_IMAGE 請求");
 
-            // ✅ 接收伺服器回傳資料
-            String response = in.readUTF();
-            Log.d("Ranking", "收到回應，長度: " + response.length());
+            // 🔹 使用 InputStream 讀取大型資料
+            String response = readLargeResponse(in);
+
+            Log.d("Ranking", "收到回應，長度: " + response.length() + " 字元 (" + (response.length() / 1024) + " KB)");
             Log.d("Ranking", "前 500 字元: " + response.substring(0, Math.min(500, response.length())));
 
             // ✅ 提取 JSON 陣列部分
@@ -64,7 +74,7 @@ public class RankingActivity extends AppCompatActivity {
             }
 
             String jsonPart = response.substring(start, end + 1);
-            Log.d("Ranking", "JSON 部分長度: " + jsonPart.length());
+            Log.d("Ranking", "JSON 部分長度: " + jsonPart.length() + " 字元");
 
             JSONArray arr = new JSONArray(jsonPart);
             Log.d("Ranking", "JSON 陣列大小: " + arr.length());
@@ -80,7 +90,7 @@ public class RankingActivity extends AppCompatActivity {
                 Log.d("Ranking", "======= 使用者 " + (i+1) + " =======");
                 Log.d("Ranking", "姓名: " + name);
                 Log.d("Ranking", "碳排放: " + total);
-                Log.d("Ranking", "圖片 Base64 長度: " + imageBase64.length());
+                Log.d("Ranking", "圖片 Base64 長度: " + imageBase64.length() + " 字元");
 
                 if (!imageBase64.isEmpty()) {
                     Log.d("Ranking", "Base64 前 100 字元: " + imageBase64.substring(0, Math.min(100, imageBase64.length())));
@@ -94,42 +104,7 @@ public class RankingActivity extends AppCompatActivity {
                 }
 
                 // 🔹 解碼 Base64 為 Bitmap
-                Bitmap bitmap = null;
-                if (!imageBase64.isEmpty()) {
-                    try {
-                        // 🔹 移除可能的前綴 (data:image/...)
-                        if (imageBase64.contains(",")) {
-                            imageBase64 = imageBase64.split(",")[1];
-                            Log.d("Ranking", "移除前綴後長度: " + imageBase64.length());
-                        }
-
-                        // 🔹 移除所有空白字元和換行
-                        imageBase64 = imageBase64.replaceAll("\\s+", "");
-                        Log.d("Ranking", "移除空白後長度: " + imageBase64.length());
-
-                        // 🔹 解碼
-                        byte[] decodedBytes = Base64.decode(imageBase64, Base64.DEFAULT);
-                        Log.d("Ranking", "解碼後 byte 陣列大小: " + decodedBytes.length + " bytes");
-
-                        bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.length);
-
-                        if (bitmap != null) {
-                            Log.d("Ranking", "✅ 圖片解碼成功! 尺寸: " + bitmap.getWidth() + "x" + bitmap.getHeight());
-                        } else {
-                            Log.e("Ranking", "❌ BitmapFactory 回傳 null");
-                        }
-
-                    } catch (IllegalArgumentException e) {
-                        Log.e("Ranking", "❌ Base64 解碼失敗: " + e.getMessage());
-                        e.printStackTrace();
-                    } catch (Exception e) {
-                        Log.e("Ranking", "❌ 圖片處理失敗: " + e.getMessage());
-                        e.printStackTrace();
-                    }
-                } else {
-                    Log.w("Ranking", "⚠️ 無圖片資料");
-                }
-
+                Bitmap bitmap = decodeBase64Image(imageBase64, name);
                 list.add(new UserData(name, totalValue, bitmap));
             }
 
@@ -145,10 +120,6 @@ public class RankingActivity extends AppCompatActivity {
                         Toast.LENGTH_LONG).show();
             });
 
-            in.close();
-            out.close();
-            socket.close();
-
         } catch (IOException e) {
             Log.e("Ranking", "連線錯誤: " + e.getMessage());
             e.printStackTrace();
@@ -157,7 +128,101 @@ public class RankingActivity extends AppCompatActivity {
             Log.e("Ranking", "解析錯誤: " + e.getMessage());
             e.printStackTrace();
             runOnUiThread(() -> showError("❌ 資料解析錯誤: " + e.getMessage()));
+        } finally {
+            // 確保資源被關閉
+            try {
+                if (in != null) in.close();
+                if (out != null) out.close();
+                if (socket != null) socket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
+    }
+
+    /**
+     * 🔹 使用 InputStream 讀取大型回應資料
+     */
+    private String readLargeResponse(DataInputStream in) throws IOException {
+        Log.d("Ranking", "開始讀取伺服器回應...");
+
+        // 先讀取資料長度（DataInputStream.writeUTF 會先寫入長度）
+        int length = in.readUnsignedShort();
+        Log.d("Ranking", "資料長度標記: " + length + " bytes");
+
+        // 使用 ByteArrayOutputStream 收集資料
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192]; // 8KB 緩衝區
+        int totalRead = 0;
+        int bytesRead;
+
+        // 讀取指定長度的資料
+        while (totalRead < length) {
+            int toRead = Math.min(buffer.length, length - totalRead);
+            bytesRead = in.read(buffer, 0, toRead);
+
+            if (bytesRead == -1) {
+                throw new IOException("連接中斷，已讀取 " + totalRead + "/" + length + " bytes");
+            }
+
+            baos.write(buffer, 0, bytesRead);
+            totalRead += bytesRead;
+
+            // 顯示進度
+            if (totalRead % (50 * 1024) == 0 || totalRead == length) {
+                Log.d("Ranking", "讀取進度: " + (totalRead * 100 / length) + "% (" + (totalRead / 1024) + " KB / " + (length / 1024) + " KB)");
+            }
+        }
+
+        String result = baos.toString("UTF-8");
+        Log.d("Ranking", "讀取完成！總計: " + totalRead + " bytes");
+
+        return result;
+    }
+
+    /**
+     * 🔹 解碼 Base64 圖片
+     */
+    private Bitmap decodeBase64Image(String imageBase64, String userName) {
+        if (imageBase64.isEmpty()) {
+            Log.w("Ranking", "⚠️ 無圖片資料: " + userName);
+            return null;
+        }
+
+        try {
+            // 🔹 移除可能的前綴 (data:image/...)
+            if (imageBase64.contains(",")) {
+                imageBase64 = imageBase64.split(",")[1];
+                Log.d("Ranking", "移除前綴後長度: " + imageBase64.length());
+            }
+
+            // 🔹 移除所有空白字元和換行
+            imageBase64 = imageBase64.replaceAll("\\s+", "");
+            Log.d("Ranking", "移除空白後長度: " + imageBase64.length());
+
+            // 🔹 解碼
+            byte[] decodedBytes = Base64.decode(imageBase64, Base64.DEFAULT);
+            Log.d("Ranking", "解碼後 byte 陣列大小: " + decodedBytes.length + " bytes (" + (decodedBytes.length / 1024) + " KB)");
+
+            Bitmap bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.length);
+
+            if (bitmap != null) {
+                Log.d("Ranking", "✅ 圖片解碼成功! 使用者: " + userName + ", 尺寸: " + bitmap.getWidth() + "x" + bitmap.getHeight());
+            } else {
+                Log.e("Ranking", "❌ BitmapFactory 回傳 null: " + userName);
+            }
+
+            return bitmap;
+
+        } catch (IllegalArgumentException e) {
+            Log.e("Ranking", "❌ Base64 解碼失敗 (" + userName + "): " + e.getMessage());
+            e.printStackTrace();
+        } catch (Exception e) {
+            Log.e("Ranking", "❌ 圖片處理失敗 (" + userName + "): " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return null;
     }
 
     private void showRankingTable(List<UserData> list) {

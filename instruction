@@ -1,4 +1,0 @@
-git config merge.ours.driver true
-git update-index --skip-worktree gradle\libs.versions.toml        
-git update-index --skip-worktree app\src\main\java\com\example\myapplication2\Config.java    
-git update-index --skip-worktree gradle\wrapper\gradle-wrapper.properties

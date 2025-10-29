@@ -103,27 +103,76 @@ public class Server {
         }
     }
 
-    // 🔹 新增：讀取包含圖片的完整資料
+    // 🔹 新增：讀取包含圖片的完整資料（使用 InputStream）
     public static synchronized String readAllDataWithImages() {
+        InputStream inputStream = null;
+        ByteArrayOutputStream baos = null;
+        
         try {
-            // 在 URL 後面加上參數，告訴 Google Apps Script 要返回圖片
-            URL url = new URL(urlString + "?includeImages=true");
+            // 🔹 重要：確保 URL 正確編碼參數
+            String fullUrl = urlString + "?includeImages=true";
+            System.out.println("請求 URL: " + fullUrl);
+            
+            URL url = new URL(fullUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(30000); // 因為有圖片，延長超時時間
             conn.setReadTimeout(30000);
+            conn.setRequestProperty("Accept-Charset", "UTF-8");
 
-            BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-            br.close();
+            // 檢查回應碼
+            int responseCode = conn.getResponseCode();
+            System.out.println("回應碼: " + responseCode);
+            
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                System.out.println("HTTP 錯誤: " + responseCode);
+                return "[]";
+            }
 
-            System.out.println("成功讀取含圖片的資料，長度: " + sb.length());
-            return sb.toString();
+            // 🔹 使用 InputStream 分塊讀取
+            inputStream = conn.getInputStream();
+            baos = new ByteArrayOutputStream();
+            
+            byte[] buffer = new byte[8192]; // 8KB 緩衝區
+            int bytesRead;
+            long totalBytes = 0;
+            
+            System.out.println("開始讀取資料...");
+            
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+                totalBytes += bytesRead;
+                
+                // 每讀取 100KB 顯示一次進度
+                if (totalBytes % (100 * 1024) == 0) {
+                    System.out.println("已讀取: " + (totalBytes / 1024) + " KB");
+                }
+            }
+            
+            // 轉換為字串
+            String result = baos.toString("UTF-8");
+            System.out.println("成功讀取含圖片的資料，總大小: " + (totalBytes / 1024) + " KB (" + totalBytes + " bytes)");
+            
+            // 顯示前 500 個字元用於除錯
+            if (result.length() > 0) {
+                System.out.println("資料前 500 字元: " + result.substring(0, Math.min(500, result.length())));
+            }
+            
+            conn.disconnect();
+            return result;
+            
         } catch (Exception e) {
             System.out.println("Error reading data with images: " + e.getMessage());
+            e.printStackTrace();
             return "[]";
+        } finally {
+            // 確保資源被關閉
+            try {
+                if (baos != null) baos.close();
+                if (inputStream != null) inputStream.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 

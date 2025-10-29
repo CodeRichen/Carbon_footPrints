@@ -1,0 +1,16 @@
+git innore設定指令:
+git config merge.ours.driver true
+git update-index --skip-worktree gradle\libs.versions.toml        
+git update-index --skip-worktree app\src\main\java\com\example\myapplication2\Config.java    
+git update-index --skip-worktree gradle\wrapper\gradle-wrapper.properties
+
+資料庫網址:
+https://docs.google.com/spreadsheets/d/1cXkFnpGBheXFyIE4r2TYEF3lZYES5NZeUjuKjvpXj7I/edit?gid=0#gid=0
+https://script.google.com/u/0/home/projects/1CvPZ5lA-rNA_kfV2ifoDH1N3GarmCnxVMGK7HDEgUmnxvXUQblcHhmpO/edit
+
+開發注意事項:
+
+1.Google Apps Script 有以下配額限制:
+URL Fetch 呼叫次數: 每天 20,000 次
+同一來源的請求頻率: 過於頻繁會被限制
+執行時間: 單次執行最多 6 分鐘
